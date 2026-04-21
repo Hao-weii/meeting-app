@@ -1,0 +1,941 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>會議紀錄產生器</title>
+  <style>
+    :root {
+      --primary: #3b82f6;
+      --primary-dark: #2563eb;
+      --primary-light: #eff6ff;
+      --bg: #f1f5f9;
+      --card: #ffffff;
+      --border: #e2e8f0;
+      --text: #0f172a;
+      --muted: #64748b;
+      --success: #16a34a;
+      --error: #dc2626;
+      --radius: 10px;
+      --shadow: 0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.05);
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang TC', 'Microsoft JhengHei', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      font-size: 14px;
+    }
+
+    /* ── Header ── */
+    header {
+      background: linear-gradient(135deg, #1e3a5f 0%, #2563eb 100%);
+      color: white;
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    header svg { flex-shrink: 0; opacity: .9; }
+    header h1 { font-size: 18px; font-weight: 700; letter-spacing: -.3px; }
+    header p  { font-size: 12px; opacity: .75; margin-top: 2px; }
+
+    /* ── Tabs ── */
+    .tab-bar {
+      background: white;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      padding: 0 20px;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    .tab-btn {
+      padding: 13px 18px;
+      border: none;
+      background: none;
+      cursor: pointer;
+      font-size: 13.5px;
+      color: var(--muted);
+      border-bottom: 2px solid transparent;
+      transition: color .15s, border-color .15s;
+      font-weight: 500;
+    }
+    .tab-btn.active { color: var(--primary); border-bottom-color: var(--primary); }
+    .tab-btn:hover:not(.active) { color: var(--text); }
+
+    /* ── Layout ── */
+    .container { max-width: 700px; margin: 24px auto; padding: 0 16px 40px; }
+
+    /* ── Card ── */
+    .card {
+      background: var(--card);
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      padding: 20px;
+      margin-bottom: 14px;
+      box-shadow: var(--shadow);
+    }
+    .card-title {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .07em;
+      margin-bottom: 16px;
+    }
+
+    /* ── Forms ── */
+    .form-group { margin-bottom: 14px; }
+    .form-group:last-child { margin-bottom: 0; }
+    label { display: block; font-size: 13px; font-weight: 500; margin-bottom: 6px; }
+
+    input[type="text"],
+    input[type="password"],
+    input[type="date"],
+    input[type="url"],
+    select,
+    textarea {
+      width: 100%;
+      padding: 9px 12px;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      font-size: 14px;
+      color: var(--text);
+      background: white;
+      transition: border-color .15s, box-shadow .15s;
+      font-family: inherit;
+    }
+    input:focus, select:focus, textarea:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(59,130,246,.12);
+    }
+    textarea { min-height: 80px; resize: vertical; }
+    input[type="file"] {
+      width: 100%;
+      padding: 8px 12px;
+      border: 2px dashed var(--border);
+      border-radius: 7px;
+      cursor: pointer;
+      background: #f8fafc;
+      font-family: inherit;
+    }
+    input[type="file"]:hover { border-color: var(--primary); }
+    small { display: block; margin-top: 5px; color: var(--muted); font-size: 12px; }
+
+    /* ── Buttons ── */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 9px 16px;
+      border: 1px solid transparent;
+      border-radius: 7px;
+      font-size: 13.5px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all .15s;
+      white-space: nowrap;
+      font-family: inherit;
+    }
+    .btn-primary  { background: var(--primary); color: white; }
+    .btn-primary:hover  { background: var(--primary-dark); }
+    .btn-secondary { background: white; color: var(--text); border-color: var(--border); }
+    .btn-secondary:hover { background: #f8fafc; }
+    .btn-success  { background: #dcfce7; color: var(--success); border-color: #bbf7d0; }
+    .btn-success:hover  { background: #bbf7d0; }
+    .btn-lg { padding: 12px 20px; font-size: 15px; width: 100%; }
+    .btn:disabled { opacity: .45; cursor: not-allowed; pointer-events: none; }
+
+    /* ── Radio group ── */
+    .radio-group { display: flex; gap: 24px; }
+    .radio-option {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      font-size: 13.5px;
+      font-weight: 500;
+    }
+    .radio-option input { cursor: pointer; }
+
+    /* ── Tag pills ── */
+    .tag-list { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 12px; min-height: 30px; }
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 4px 10px 4px 12px;
+      background: var(--primary-light);
+      color: var(--primary-dark);
+      border-radius: 20px;
+      font-size: 12.5px;
+      font-weight: 500;
+    }
+    .tag-remove {
+      border: none;
+      background: none;
+      cursor: pointer;
+      color: inherit;
+      font-size: 15px;
+      line-height: 1;
+      padding: 0 2px;
+      opacity: .6;
+    }
+    .tag-remove:hover { opacity: 1; color: var(--error); }
+
+    /* ── Inline add row ── */
+    .inline-add { display: flex; gap: 8px; align-items: center; }
+    .inline-add input { flex: 1; }
+
+    /* ── Select + add ── */
+    .select-row { display: flex; gap: 8px; align-items: flex-start; }
+    .select-row select { flex: 1; }
+    .add-type-inline {
+      display: flex;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .add-type-inline input { flex: 1; }
+
+    /* ── Preview area ── */
+    .preview-wrap {
+      background: #f8fafc;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      max-height: 520px;
+      overflow-y: auto;
+      margin-bottom: 16px;
+    }
+    #output-preview {
+      padding: 20px 22px;
+      font-family: 'SF Mono', 'Cascadia Code', 'Consolas', 'Menlo', monospace;
+      font-size: 12.5px;
+      line-height: 1.75;
+      white-space: pre-wrap;
+      word-break: break-word;
+      color: var(--text);
+    }
+
+    /* ── Action bar ── */
+    .action-bar { display: flex; gap: 10px; flex-wrap: wrap; }
+
+    /* ── Back link ── */
+    .back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      color: var(--primary);
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      border: none;
+      background: none;
+      padding: 0;
+      margin-bottom: 16px;
+    }
+    .back-link:hover { text-decoration: underline; }
+
+    /* ── Views ── */
+    .view { display: none; }
+    .view.active { display: block; }
+
+    /* ── Loading overlay ── */
+    #loading-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(15,23,42,.55);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 200;
+      backdrop-filter: blur(2px);
+    }
+    .spinner {
+      width: 42px; height: 42px;
+      border: 3px solid rgba(255,255,255,.25);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: spin .75s linear infinite;
+      margin-bottom: 14px;
+    }
+    #loading-text { color: white; font-size: 14px; font-weight: 500; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Toast ── */
+    .toast {
+      position: fixed;
+      bottom: 28px;
+      right: 24px;
+      padding: 11px 18px;
+      border-radius: 8px;
+      color: white;
+      font-size: 13.5px;
+      font-weight: 500;
+      z-index: 300;
+      max-width: 340px;
+      box-shadow: 0 4px 12px rgba(0,0,0,.2);
+      animation: toastIn .25s ease;
+    }
+    .toast a { color: white; text-decoration: underline; }
+    .toast.success { background: var(--success); }
+    .toast.error   { background: var(--error); }
+    @keyframes toastIn { from { transform: translateY(10px); opacity: 0; } to { opacity: 1; } }
+
+    /* ── Misc ── */
+    .hidden { display: none !important; }
+    .divider { border: none; border-top: 1px solid var(--border); margin: 6px 0 16px; }
+    .counter-badge {
+      display: inline-block;
+      background: #fef9c3;
+      color: #854d0e;
+      border: 1px solid #fde68a;
+      border-radius: 5px;
+      padding: 2px 8px;
+      font-size: 12px;
+      font-weight: 600;
+      margin-left: 8px;
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── Header ── -->
+<header>
+  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+    <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+    <line x1="12" y1="19" x2="12" y2="23"/>
+    <line x1="8"  y1="23" x2="16" y2="23"/>
+  </svg>
+  <div>
+    <h1>會議紀錄產生器</h1>
+    <p id="header-project-name">載入中…</p>
+  </div>
+</header>
+
+<!-- ── Tab Bar ── -->
+<div class="tab-bar">
+  <button class="tab-btn active" id="tab-main"     onclick="switchTab('main')">生成會議紀錄</button>
+  <button class="tab-btn"        id="tab-settings" onclick="switchTab('settings')">⚙ 設定</button>
+</div>
+
+<!-- ══════════════════════════════════════════════
+     VIEW: MAIN (generate)
+════════════════════════════════════════════════ -->
+<div id="view-main" class="view active">
+  <div class="container">
+
+    <!-- API Settings -->
+    <div class="card">
+      <div class="card-title">API 設定</div>
+      <div class="form-group">
+        <label for="api-key">Gemini API Key <span style="color:var(--muted);font-weight:400">（每次填寫，不儲存）</span></label>
+        <input type="password" id="api-key" placeholder="AIza…" autocomplete="off" spellcheck="false" />
+      </div>
+      <div class="form-group">
+        <label for="model">模型</label>
+        <select id="model">
+          <option value="gemini-3.1-flash-lite-preview">gemini-3.1-flash-lite-preview（500 RPD，推薦）</option>
+          <option value="gemini-3-flash-preview">gemini-3-flash-preview（20 RPD）</option>
+          <option value="gemini-2.5-flash">gemini-2.5-flash（20 RPD）</option>
+          <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite（20 RPD）</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Audio Source -->
+    <div class="card">
+      <div class="card-title">音訊來源</div>
+      <div class="radio-group" style="margin-bottom:16px">
+        <label class="radio-option">
+          <input type="radio" name="source" value="file" checked onchange="toggleSource()" />
+          上傳本地檔案
+        </label>
+        <label class="radio-option">
+          <input type="radio" name="source" value="drive" onchange="toggleSource()" />
+          Google Drive 連結
+        </label>
+      </div>
+
+      <div id="file-section">
+        <input type="file" id="audio-file" accept=".ogg,.m4a,.mp3,.wav,.mp4" />
+        <small>支援 .ogg、.m4a、.mp3、.wav 格式，上限 500 MB</small>
+      </div>
+
+      <div id="drive-section" class="hidden">
+        <label for="drive-url">Google Drive 公開連結</label>
+        <input type="url" id="drive-url"
+          placeholder="https://drive.google.com/file/d/…/view?usp=sharing" />
+        <small>請確認檔案已設為「知道連結的人都可以檢視」</small>
+      </div>
+    </div>
+
+    <!-- Meeting Info -->
+    <div class="card">
+      <div class="card-title">會議資訊</div>
+      <div class="form-group">
+        <label for="meeting-date">日期</label>
+        <input type="date" id="meeting-date" />
+      </div>
+      <div class="form-group">
+        <label for="meeting-type">類型</label>
+        <div class="select-row">
+          <select id="meeting-type"></select>
+          <button class="btn btn-secondary" onclick="showAddTypeForm()">+ 新增</button>
+        </div>
+        <div id="add-type-form" class="add-type-inline hidden">
+          <input type="text" id="new-type-input" placeholder="輸入新類型名稱" />
+          <button class="btn btn-primary"    onclick="confirmAddType()">確認</button>
+          <button class="btn btn-secondary"  onclick="hideAddTypeForm()">取消</button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="meeting-topic">主題</label>
+        <input type="text" id="meeting-topic" placeholder="例：與教授討論進度報告" />
+      </div>
+    </div>
+
+    <button class="btn btn-primary btn-lg" id="generate-btn" onclick="doGenerate()">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polygon points="5 3 19 12 5 21 5 3"/>
+      </svg>
+      生成會議紀錄
+    </button>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════
+     VIEW: OUTPUT
+════════════════════════════════════════════════ -->
+<div id="view-output" class="view">
+  <div class="container">
+    <button class="back-link" onclick="switchTab('main')">← 返回</button>
+
+    <div class="card">
+      <div class="card-title" style="display:flex;align-items:center;justify-content:space-between">
+        <span>會議紀錄預覽</span>
+        <span id="output-filename" style="font-size:11px;color:var(--muted);font-weight:400;font-family:monospace;text-transform:none"></span>
+      </div>
+      <div class="preview-wrap">
+        <div id="output-preview"></div>
+      </div>
+      <div class="action-bar">
+        <button class="btn btn-secondary" onclick="copyContent()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          複製全文
+        </button>
+        <button class="btn btn-secondary" onclick="downloadMd()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          下載 .md
+        </button>
+        <button class="btn btn-primary" id="upload-btn" onclick="doUploadToNotion()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          上傳至 Notion
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════
+     VIEW: SETTINGS
+════════════════════════════════════════════════ -->
+<div id="view-settings" class="view">
+  <div class="container">
+
+    <!-- Project Info -->
+    <div class="card">
+      <div class="card-title">專題資訊</div>
+      <div class="form-group">
+        <label for="s-project-name">專題名稱</label>
+        <input type="text" id="s-project-name" placeholder="例：AI 輔助醫療診斷系統" />
+      </div>
+      <div class="form-group">
+        <label for="s-project-desc">背景描述</label>
+        <textarea id="s-project-desc" placeholder="簡述專題目標與技術方向，供 Gemini 生成紀錄時參考…"></textarea>
+      </div>
+    </div>
+
+    <!-- Members -->
+    <div class="card">
+      <div class="card-title">固定成員</div>
+      <div class="tag-list" id="members-list"></div>
+      <div class="inline-add">
+        <input type="text" id="s-new-member" placeholder="輸入成員名稱" />
+        <button class="btn btn-secondary" onclick="addMember()">+ 新增</button>
+      </div>
+    </div>
+
+    <!-- Meeting Types -->
+    <div class="card">
+      <div class="card-title">會議類型</div>
+      <div class="tag-list" id="types-list"></div>
+      <div class="inline-add">
+        <input type="text" id="s-new-type" placeholder="輸入類型名稱" />
+        <button class="btn btn-secondary" onclick="addTypeInSettings()">+ 新增</button>
+      </div>
+    </div>
+
+    <!-- Counter Info -->
+    <div class="card" style="background:#fffbeb;border-color:#fde68a">
+      <div class="card-title" style="color:#92400e">流水號</div>
+      <p style="font-size:13px;color:#78350f">
+        目前流水號：<strong id="s-counter-display">—</strong>
+        <span style="color:var(--muted);font-weight:400">（每次上傳至 Notion 後自動 +1）</span>
+      </p>
+    </div>
+
+    <div style="display:flex;gap:10px">
+      <button class="btn btn-primary" style="flex:1;padding:12px" onclick="saveSettings()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+        儲存設定至 Notion
+      </button>
+      <button class="btn btn-secondary" style="padding:12px 16px" onclick="reloadConfig()" title="從 Notion 重新載入">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.5"/></svg>
+        重新載入
+      </button>
+    </div>
+
+  </div>
+</div>
+
+<!-- ── Loading Overlay ── -->
+<div id="loading-overlay" class="hidden">
+  <div class="spinner"></div>
+  <div id="loading-text">處理中…</div>
+</div>
+
+<script>
+// ─────────────────────────────────────────────────────────────────────────────
+// State
+// ─────────────────────────────────────────────────────────────────────────────
+let appConfig = null;
+let generatedContent = '';
+let currentMeeting = {};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Init
+// ─────────────────────────────────────────────────────────────────────────────
+async function init() {
+  setDefaultDate();
+  await loadConfig();
+}
+
+function setDefaultDate() {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm   = String(d.getMonth() + 1).padStart(2, '0');
+  const dd   = String(d.getDate()).padStart(2, '0');
+  document.getElementById('meeting-date').value = `${yyyy}-${mm}-${dd}`;
+}
+
+async function loadConfig() {
+  try {
+    const resp = await fetch('/config');
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || '讀取失敗');
+    appConfig = data;
+    applyConfigToUI();
+  } catch (e) {
+    showToast('載入設定失敗：' + e.message, 'error');
+    appConfig = {
+      project_name: '', project_description: '',
+      members: [], meeting_counter: 1,
+      meeting_types: ['組內會議', '教授會議', '進度回報', '技術討論'],
+    };
+    applyConfigToUI();
+  }
+}
+
+async function reloadConfig() {
+  showLoading('重新載入設定…');
+  try {
+    const resp = await fetch('/config');
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error);
+    appConfig = data;
+    applyConfigToUI();
+    renderSettingsLists();
+    showToast('設定已重新載入', 'success');
+  } catch (e) {
+    showToast('重新載入失敗：' + e.message, 'error');
+  } finally {
+    hideLoading();
+  }
+}
+
+function applyConfigToUI() {
+  document.getElementById('header-project-name').textContent =
+    appConfig.project_name || '尚未設定專題名稱';
+  rebuildTypeDropdown();
+}
+
+function rebuildTypeDropdown(keepValue) {
+  const sel  = document.getElementById('meeting-type');
+  const prev = keepValue ?? sel.value;
+  sel.innerHTML = '';
+  (appConfig.meeting_types || []).forEach(t => {
+    const opt = document.createElement('option');
+    opt.value = opt.textContent = t;
+    sel.appendChild(opt);
+  });
+  if (prev && [...sel.options].some(o => o.value === prev)) sel.value = prev;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tab switching
+// ─────────────────────────────────────────────────────────────────────────────
+function switchTab(tab) {
+  ['main', 'output', 'settings'].forEach(v => {
+    document.getElementById('view-' + v).classList.remove('active');
+  });
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+
+  document.getElementById('view-' + tab).classList.add('active');
+  const tabEl = document.getElementById('tab-' + tab);
+  if (tabEl) tabEl.classList.add('active');
+
+  if (tab === 'settings') renderSettingsLists();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Audio source toggle
+// ─────────────────────────────────────────────────────────────────────────────
+function toggleSource() {
+  const isFile = document.querySelector('input[name="source"]:checked').value === 'file';
+  document.getElementById('file-section').classList.toggle('hidden', !isFile);
+  document.getElementById('drive-section').classList.toggle('hidden', isFile);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Inline add meeting type (on main page)
+// ─────────────────────────────────────────────────────────────────────────────
+function showAddTypeForm() {
+  document.getElementById('add-type-form').classList.remove('hidden');
+  document.getElementById('new-type-input').focus();
+}
+
+function hideAddTypeForm() {
+  document.getElementById('add-type-form').classList.add('hidden');
+  document.getElementById('new-type-input').value = '';
+}
+
+async function confirmAddType() {
+  const input = document.getElementById('new-type-input');
+  const type  = input.value.trim();
+  if (!type) return;
+  if (appConfig.meeting_types.includes(type)) {
+    document.getElementById('meeting-type').value = type;
+    hideAddTypeForm();
+    return;
+  }
+  appConfig.meeting_types.push(type);
+  rebuildTypeDropdown(type);
+  hideAddTypeForm();
+
+  // Auto-save to Notion
+  try {
+    const resp = await fetch('/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(appConfig),
+    });
+    if (!resp.ok) throw new Error((await resp.json()).error);
+    showToast(`已新增類型「${type}」並儲存`, 'success');
+  } catch (e) {
+    showToast('儲存類型失敗：' + e.message, 'error');
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Generate
+// ─────────────────────────────────────────────────────────────────────────────
+async function doGenerate() {
+  const apiKey     = document.getElementById('api-key').value.trim();
+  const model      = document.getElementById('model').value;
+  const date       = document.getElementById('meeting-date').value;
+  const meetingType= document.getElementById('meeting-type').value;
+  const topic      = document.getElementById('meeting-topic').value.trim();
+  const source     = document.querySelector('input[name="source"]:checked').value;
+
+  if (!apiKey)    return showToast('請輸入 Gemini API Key', 'error');
+  if (!date)      return showToast('請選擇會議日期', 'error');
+  if (!meetingType) return showToast('請選擇會議類型', 'error');
+  if (!topic)     return showToast('請輸入會議主題', 'error');
+
+  const fd = new FormData();
+  fd.append('apiKey', apiKey);
+  fd.append('model', model);
+  fd.append('date', date);
+  fd.append('meetingType', meetingType);
+  fd.append('topic', topic);
+  fd.append('config', JSON.stringify(appConfig));
+
+  if (source === 'file') {
+    const file = document.getElementById('audio-file').files[0];
+    if (!file) return showToast('請選擇音訊檔案', 'error');
+    fd.append('audio', file);
+  } else {
+    const url = document.getElementById('drive-url').value.trim();
+    if (!url) return showToast('請輸入 Google Drive 連結', 'error');
+    fd.append('driveUrl', url);
+  }
+
+  currentMeeting = { date, meetingType, topic };
+
+  showLoading('上傳音訊並呼叫 Gemini，這可能需要數十秒…');
+  document.getElementById('generate-btn').disabled = true;
+  try {
+    const resp = await fetch('/generate', { method: 'POST', body: fd });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || '生成失敗');
+
+    generatedContent = data.content;
+
+    // Update preview
+    document.getElementById('output-preview').textContent = generatedContent;
+    updateOutputFilename();
+
+    // Switch to output view (without changing tab highlight)
+    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+    document.getElementById('view-output').classList.add('active');
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById('tab-main').classList.add('active');
+
+    document.getElementById('upload-btn').disabled = false;
+  } catch (e) {
+    showToast('生成失敗：' + e.message, 'error');
+  } finally {
+    hideLoading();
+    document.getElementById('generate-btn').disabled = false;
+  }
+}
+
+function updateOutputFilename() {
+  const { date, meetingType, topic } = currentMeeting;
+  const counter  = String(appConfig.meeting_counter).padStart(3, '0');
+  const filename = `${counter}_${date}_${meetingType}_${topic}.md`;
+  document.getElementById('output-filename').textContent = filename;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Output actions
+// ─────────────────────────────────────────────────────────────────────────────
+function copyContent() {
+  if (!generatedContent) return;
+  navigator.clipboard.writeText(generatedContent)
+    .then(() => showToast('已複製到剪貼簿', 'success'))
+    .catch(() => {
+      // Fallback
+      const ta = document.createElement('textarea');
+      ta.value = generatedContent;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      ta.remove();
+      showToast('已複製到剪貼簿', 'success');
+    });
+}
+
+function downloadMd() {
+  if (!generatedContent) return;
+  const { date, meetingType, topic } = currentMeeting;
+  const counter  = String(appConfig.meeting_counter).padStart(3, '0');
+  const filename = `${counter}_${date}_${meetingType}_${topic}.md`;
+  const blob = new Blob([generatedContent], { type: 'text/markdown;charset=utf-8' });
+  const a    = document.createElement('a');
+  a.href     = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+async function doUploadToNotion() {
+  const { date, meetingType, topic } = currentMeeting;
+  const mm    = date.slice(5, 7);
+  const dd    = date.slice(8, 10);
+  const title = `${mm}${dd}_${topic}`;
+
+  showLoading('上傳至 Notion…');
+  document.getElementById('upload-btn').disabled = true;
+  try {
+    const resp = await fetch('/upload-to-notion', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title,
+        date,
+        meetingType,
+        content: generatedContent,
+        config: JSON.stringify(appConfig),
+      }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || '上傳失敗');
+
+    appConfig.meeting_counter = data.newCounter;
+    updateOutputFilename();
+
+    if (data.pageUrl) {
+      showToast(
+        `上傳成功！流水號已更新為 ${String(data.newCounter).padStart(3,'0')}。<a href="${data.pageUrl}" target="_blank">開啟頁面</a>`,
+        'success'
+      );
+    } else {
+      showToast(`上傳成功！流水號已更新為 ${String(data.newCounter).padStart(3,'0')}`, 'success');
+    }
+    document.getElementById('upload-btn').disabled = false;
+  } catch (e) {
+    showToast('上傳失敗：' + e.message, 'error');
+    document.getElementById('upload-btn').disabled = false;
+  } finally {
+    hideLoading();
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Settings
+// ─────────────────────────────────────────────────────────────────────────────
+function renderSettingsLists() {
+  if (!appConfig) return;
+  document.getElementById('s-project-name').value = appConfig.project_name || '';
+  document.getElementById('s-project-desc').value = appConfig.project_description || '';
+  document.getElementById('s-counter-display').textContent =
+    String(appConfig.meeting_counter).padStart(3, '0');
+
+  // Members
+  const ml = document.getElementById('members-list');
+  ml.innerHTML = '';
+  (appConfig.members || []).forEach(m => {
+    const span = document.createElement('span');
+    span.className = 'tag';
+    span.textContent = m;
+    const btn  = document.createElement('button');
+    btn.className = 'tag-remove';
+    btn.textContent = '×';
+    btn.title = '移除';
+    btn.onclick = () => { appConfig.members = appConfig.members.filter(x => x !== m); renderSettingsLists(); };
+    span.appendChild(btn);
+    ml.appendChild(span);
+  });
+
+  // Types
+  const tl = document.getElementById('types-list');
+  tl.innerHTML = '';
+  (appConfig.meeting_types || []).forEach(t => {
+    const span = document.createElement('span');
+    span.className = 'tag';
+    span.textContent = t;
+    const btn  = document.createElement('button');
+    btn.className = 'tag-remove';
+    btn.textContent = '×';
+    btn.title = '移除';
+    btn.onclick = () => {
+      appConfig.meeting_types = appConfig.meeting_types.filter(x => x !== t);
+      renderSettingsLists();
+      rebuildTypeDropdown();
+    };
+    span.appendChild(btn);
+    tl.appendChild(span);
+  });
+}
+
+function addMember() {
+  const input = document.getElementById('s-new-member');
+  const name  = input.value.trim();
+  if (!name) return;
+  if (!appConfig.members.includes(name)) {
+    appConfig.members.push(name);
+    renderSettingsLists();
+  }
+  input.value = '';
+}
+
+function addTypeInSettings() {
+  const input = document.getElementById('s-new-type');
+  const type  = input.value.trim();
+  if (!type) return;
+  if (!appConfig.meeting_types.includes(type)) {
+    appConfig.meeting_types.push(type);
+    renderSettingsLists();
+    rebuildTypeDropdown();
+  }
+  input.value = '';
+}
+
+async function saveSettings() {
+  appConfig.project_name        = document.getElementById('s-project-name').value.trim();
+  appConfig.project_description = document.getElementById('s-project-desc').value.trim();
+
+  showLoading('儲存設定至 Notion…');
+  try {
+    const resp = await fetch('/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(appConfig),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || '儲存失敗');
+    applyConfigToUI();
+    showToast('設定已儲存', 'success');
+  } catch (e) {
+    showToast('儲存失敗：' + e.message, 'error');
+  } finally {
+    hideLoading();
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// UI Helpers
+// ─────────────────────────────────────────────────────────────────────────────
+function showLoading(text = '處理中…') {
+  document.getElementById('loading-text').textContent = text;
+  document.getElementById('loading-overlay').classList.remove('hidden');
+}
+function hideLoading() {
+  document.getElementById('loading-overlay').classList.add('hidden');
+}
+
+let toastTimer = null;
+function showToast(html, type = 'success') {
+  const existing = document.querySelector('.toast');
+  if (existing) existing.remove();
+  if (toastTimer) clearTimeout(toastTimer);
+
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.innerHTML = html;
+  document.body.appendChild(el);
+  toastTimer = setTimeout(() => el.remove(), type === 'error' ? 5000 : 4000);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Keyboard shortcuts
+// ─────────────────────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  init();
+
+  document.getElementById('new-type-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter')  confirmAddType();
+    if (e.key === 'Escape') hideAddTypeForm();
+  });
+  document.getElementById('s-new-member').addEventListener('keydown', e => {
+    if (e.key === 'Enter') addMember();
+  });
+  document.getElementById('s-new-type').addEventListener('keydown', e => {
+    if (e.key === 'Enter') addTypeInSettings();
+  });
+  document.getElementById('meeting-topic').addEventListener('keydown', e => {
+    if (e.key === 'Enter') doGenerate();
+  });
+});
+</script>
+</body>
+</html>
