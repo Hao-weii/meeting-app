@@ -11,12 +11,26 @@ const express = require('express');
 const multer = require('multer');
 const { Client } = require('@notionhq/client');
 const path = require('path');
+const fs = require('fs');
+const os = require('os');
+const crypto = require('crypto');
+const { Readable } = require('stream');
+const { pipeline } = require('stream/promises');
 
 const app = express();
 const upload = multer({
-  storage: multer.memoryStorage(),
+  dest: os.tmpdir(),
   limits: { fileSize: 500 * 1024 * 1024 }, // 500 MB
 });
+
+function tempFilePath(prefix = 'meeting') {
+  return path.join(os.tmpdir(), `${prefix}-${Date.now()}-${crypto.randomBytes(6).toString('hex')}`);
+}
+
+async function safeUnlink(p) {
+  if (!p) return;
+  try { await fs.promises.unlink(p); } catch { /* ignore */ }
+}
 const notion = new Client({ auth: process.env.NOTION_TOKEN });
 
 app.use(express.json({ limit: '10mb' }));
@@ -95,34 +109,36 @@ app.post('/config', async (req, res) => {
 });
 
 app.post('/generate', upload.single('audio'), async (req, res) => {
+  let audioPath = null;
+  let cleanupAudioPath = false;
   try {
     const { apiKey, model, driveUrl, date, meetingType, topic, config } = req.body;
     const cfg = JSON.parse(config);
 
-    let audioBuffer, mimeType;
+    let mimeType;
 
     if (req.file) {
-      audioBuffer = req.file.buffer;
+      audioPath = req.file.path;
+      cleanupAudioPath = true;
       mimeType = (req.file.mimetype && req.file.mimetype !== 'application/octet-stream')
         ? req.file.mimetype
         : detectMime(req.file.originalname);
-      console.log('file mimetype:', req.file.mimetype, '| originalname:', req.file.originalname, '| resolved:', mimeType);
+      console.log('file mimetype:', req.file.mimetype, '| originalname:', req.file.originalname, '| size:', req.file.size, '| resolved:', mimeType);
     } else if (driveUrl) {
       const fileId = extractDriveId(driveUrl);
-      const downloadUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
-      const resp = await fetch(downloadUrl, { redirect: 'follow' });
-      if (!resp.ok) throw new Error(`無法取得 Drive 檔案（HTTP ${resp.status}）`);
-      const ct = resp.headers.get('content-type') || '';
-      if (ct.includes('text/html')) {
-        throw new Error('Google Drive 回傳 HTML 頁面，請確認連結已設為「知道連結的人都可以檢視」');
-      }
-      audioBuffer = Buffer.from(await resp.arrayBuffer());
-      mimeType = ct.split(';')[0].trim() || 'audio/ogg';
+      audioPath = tempFilePath('drive');
+      cleanupAudioPath = true;
+      const { contentType, filename } = await downloadFromDriveToFile(fileId, audioPath);
+      const ct = (contentType || '').split(';')[0].trim();
+      mimeType = (ct && !ct.includes('octet-stream'))
+        ? ct
+        : detectMime(filename || '');
+      console.log('drive content-type:', contentType, '| filename:', filename, '| resolved:', mimeType);
     } else {
       throw new Error('請提供音訊檔案或 Google Drive 連結');
     }
 
-    const fileUri = await uploadToGeminiFiles(apiKey, audioBuffer, mimeType);
+    const fileUri = await uploadToGeminiFiles(apiKey, audioPath, mimeType);
     await waitForGeminiFile(apiKey, fileUri);
 
     const prompt = buildPrompt(cfg, date, meetingType, topic);
@@ -132,6 +148,8 @@ app.post('/generate', upload.single('audio'), async (req, res) => {
   } catch (err) {
     console.error('POST /generate:', err.message, err.cause ?? '');
     res.status(500).json({ error: err.message });
+  } finally {
+    if (cleanupAudioPath) await safeUnlink(audioPath);
   }
 });
 
@@ -190,6 +208,59 @@ app.post('/upload-to-notion', async (req, res) => {
 
 // ─── Gemini helpers ───────────────────────────────────────────────────────────
 
+async function downloadFromDriveToFile(fileId, destPath) {
+  const base = 'https://drive.usercontent.google.com/download';
+  const firstUrl = `${base}?id=${fileId}&export=download`;
+
+  let resp = await undiciFetch(firstUrl, {
+    redirect: 'follow',
+    dispatcher: longTimeoutAgent,
+  });
+  if (!resp.ok) throw new Error(`無法取得 Drive 檔案（HTTP ${resp.status}）`);
+
+  let ct = resp.headers.get('content-type') || '';
+
+  // 大檔會先回傳 HTML 確認頁；解析其中的表單欄位（含 uuid/confirm）後重送請求
+  if (ct.includes('text/html')) {
+    const html = await resp.text();
+    const formMatch = html.match(/<form[^>]+action="([^"]+)"[^>]*>([\s\S]*?)<\/form>/i);
+    if (!formMatch) {
+      throw new Error('Google Drive 回傳 HTML 頁面，請確認連結已設為「知道連結的人都可以檢視」');
+    }
+    const action = formMatch[1].replace(/&amp;/g, '&');
+    const params = {};
+    const inputRe = /<input[^>]*name="([^"]+)"[^>]*value="([^"]*)"/gi;
+    let m;
+    while ((m = inputRe.exec(formMatch[2])) !== null) {
+      params[m[1]] = m[2];
+    }
+    const qs = new URLSearchParams(params).toString();
+    const confirmUrl = action + (action.includes('?') ? '&' : '?') + qs;
+
+    resp = await undiciFetch(confirmUrl, {
+      redirect: 'follow',
+      dispatcher: longTimeoutAgent,
+    });
+    if (!resp.ok) throw new Error(`無法取得 Drive 檔案（HTTP ${resp.status}）`);
+    ct = resp.headers.get('content-type') || '';
+    if (ct.includes('text/html')) {
+      throw new Error('Google Drive 回傳 HTML 頁面，請確認連結已設為「知道連結的人都可以檢視」');
+    }
+  }
+
+  let filename = '';
+  const cd = resp.headers.get('content-disposition') || '';
+  const fnStar = cd.match(/filename\*=UTF-8''([^;]+)/i);
+  const fn = cd.match(/filename="?([^";]+)"?/i);
+  if (fnStar) filename = decodeURIComponent(fnStar[1]);
+  else if (fn) filename = fn[1];
+
+  // 串流寫入暫存檔，避免把整個音檔讀進記憶體
+  await pipeline(Readable.fromWeb(resp.body), fs.createWriteStream(destPath));
+
+  return { contentType: ct, filename };
+}
+
 function extractDriveId(url) {
   const patterns = [/\/file\/d\/([a-zA-Z0-9_-]+)/, /[?&]id=([a-zA-Z0-9_-]+)/];
   for (const p of patterns) {
@@ -205,21 +276,34 @@ function detectMime(filename = '') {
   return map[ext] || 'audio/ogg';
 }
 
-async function uploadToGeminiFiles(apiKey, buffer, mimeType) {
+async function uploadToGeminiFiles(apiKey, filePath, mimeType) {
+  const stat = await fs.promises.stat(filePath);
   const boundary = `gem${Date.now()}`;
   const meta = JSON.stringify({ file: { mimeType } });
-  const body = Buffer.concat([
-    Buffer.from(`--${boundary}\r\nContent-Type: application/json; charset=utf-8\r\n\r\n${meta}\r\n--${boundary}\r\nContent-Type: ${mimeType}\r\n\r\n`),
-    buffer,
-    Buffer.from(`\r\n--${boundary}--`),
-  ]);
+  const head = Buffer.from(
+    `--${boundary}\r\nContent-Type: application/json; charset=utf-8\r\n\r\n${meta}\r\n` +
+    `--${boundary}\r\nContent-Type: ${mimeType}\r\n\r\n`
+  );
+  const tail = Buffer.from(`\r\n--${boundary}--`);
+  const contentLength = head.length + stat.size + tail.length;
+
+  const fileStream = fs.createReadStream(filePath);
+  const body = Readable.from((async function* () {
+    yield head;
+    for await (const chunk of fileStream) yield chunk;
+    yield tail;
+  })());
 
   const resp = await undiciFetch(
     `https://generativelanguage.googleapis.com/upload/v1beta/files?uploadType=multipart&key=${apiKey}`,
     {
       method: 'POST',
-      headers: { 'Content-Type': `multipart/related; boundary=${boundary}` },
+      headers: {
+        'Content-Type': `multipart/related; boundary=${boundary}`,
+        'Content-Length': String(contentLength),
+      },
       body,
+      duplex: 'half',
       dispatcher: longTimeoutAgent,
     }
   );
